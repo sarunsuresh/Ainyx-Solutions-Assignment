@@ -13,6 +13,8 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	ServerPort string
+	JWTSecret  string
+    JWTExpHours int
 }
 
 // Load reads config from environment variables, with sensible defaults.
@@ -24,6 +26,8 @@ func Load() Config {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "userdb"),
 		ServerPort: getEnv("SERVER_PORT", "3000"),
+		JWTSecret:   getEnv("JWT_SECRET", "changeme-secret"),
+        JWTExpHours: 24,
 	}
 }
 

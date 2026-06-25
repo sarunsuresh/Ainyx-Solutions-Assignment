@@ -2,4 +2,12 @@ CREATE TABLE IF NOT EXISTS users (
     id   SERIAL PRIMARY KEY,
     name TEXT   NOT NULL,
     dob  DATE   NOT NULL
+   
 );
+
+ALTER TABLE users
+  ADD COLUMN email         TEXT        UNIQUE NOT NULL DEFAULT '',
+  ADD COLUMN password_hash TEXT        NOT NULL DEFAULT '',
+  ADD COLUMN role          TEXT        NOT NULL DEFAULT 'user',
+  ADD COLUMN created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ADD COLUMN updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();

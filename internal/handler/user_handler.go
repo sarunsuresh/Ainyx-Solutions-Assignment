@@ -22,31 +22,26 @@ func NewUserHandler(svc *service.UserService) *UserHandler {
 	return &UserHandler{svc: svc, validate: validator.New()}
 }
 
-// POST /users
-func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
-	var req models.CreateUserRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	if err := h.validate.Struct(req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+// GET /users/me — requires auth middleware
+func (h *UserHandler) GetMe(c *fiber.Ctx) error {
+	// read the user that auth middleware injected
+	authUser, ok := c.Locals("user").(models.AuthUser)
+	if !ok {
+		return models.RespondError(c, fiber.StatusUnauthorized, models.CodeUnauthorized, "unauthorized")
 	}
 
-	user, err := h.svc.CreateUser(c.Context(), req)
+	user, err := h.svc.GetUser(c.Context(), authUser.ID)
 	if err != nil {
-		logger.Log.Error("create user failed", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not create user"})
+		return handleServiceError(c, err)
 	}
-
-	logger.Log.Info("user created", zap.Int32("id", user.ID))
-	return c.Status(fiber.StatusCreated).JSON(user)
+	return c.JSON(user)
 }
 
 // GET /users/:id
 func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid id")
 	}
 
 	user, err := h.svc.GetUser(c.Context(), id)
@@ -60,15 +55,15 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid id")
 	}
 
 	var req models.UpdateUserRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
 	}
 	if err := h.validate.Struct(req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
 	}
 
 	user, err := h.svc.UpdateUser(c.Context(), id, req)
@@ -84,16 +79,39 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 func (h *UserHandler) DeleteUser(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid id")
 	}
 
 	if err := h.svc.DeleteUser(c.Context(), id); err != nil {
 		logger.Log.Error("delete user failed", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not delete user"})
+		return models.RespondError(c, fiber.StatusInternalServerError, models.CodeServerError, "invalid body")
 	}
 
 	logger.Log.Info("user deleted", zap.Int32("id", id))
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *UserHandler) PasswordUpdate(c *fiber.Ctx) error {
+	authUser, ok := c.Locals("user").(models.AuthUser)
+	if !ok {
+		return models.RespondError(c, fiber.StatusUnauthorized, models.CodeUnauthorized, "unauthorized")
+	}
+
+	var req models.UpdatePasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
+	}
+	if err := h.validate.Struct(req); err != nil {
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
+	}
+
+	user, err := h.svc.UpdatePassword(c.Context(), authUser.ID, req)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(user)
+
 }
 
 // GET /users?limit=&offset=
@@ -104,12 +122,10 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 	users, err := h.svc.ListUsers(c.Context(), limit, offset)
 	if err != nil {
 		logger.Log.Error("list users failed", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not list users"})
+		return models.RespondError(c, fiber.StatusInternalServerError, models.CodeServerError, "loading users failed")
 	}
 	return c.JSON(users)
 }
-
-// --- small helpers ---
 
 func parseID(c *fiber.Ctx) (int32, error) {
 	id, err := strconv.Atoi(c.Params("id"))
@@ -130,8 +146,8 @@ func queryInt(c *fiber.Ctx, key string, fallback int32) int32 {
 
 func handleServiceError(c *fiber.Ctx, err error) error {
 	if errors.Is(err, service.ErrUserNotFound) {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeNotFound, "user not found ")
 	}
 	logger.Log.Error("service error", zap.Error(err))
-	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	return models.RespondError(c, fiber.StatusBadRequest, models.CodeServerError, "internal server error")
 }

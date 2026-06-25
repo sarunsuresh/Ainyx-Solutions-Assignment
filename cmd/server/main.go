@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -37,12 +38,20 @@ func main() {
 	repo := repository.NewUserRepository(db)
 	svc := service.NewUserService(repo)
 	h := handler.NewUserHandler(svc)
+	authRepo := repository.NewAuthRepository(db)
+	authSvc  := service.NewAuthService(authRepo, cfg)
+	ah       := handler.NewAuthHandler(authSvc)
+
 
 	app := fiber.New()
-	routes.Register(app, h)
+	routes.Register(app, h, ah, cfg.JWTSecret)
 
-	logger.Log.Sugar().Infof("server starting on :%s", cfg.ServerPort)
+	logger.Log.Info(
+	"server starting",
+	zap.String("port", cfg.ServerPort),
+)
 	if err := app.Listen(":" + cfg.ServerPort); err != nil {
 		log.Fatalf("server: %v", err)
 	}
 }
+
