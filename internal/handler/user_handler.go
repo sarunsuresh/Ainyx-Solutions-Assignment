@@ -3,23 +3,32 @@ package handler
 import (
 	"errors"
 	"strconv"
-
+	"database/sql"
 	"user-api/internal/logger"
 	"user-api/internal/models"
 	"user-api/internal/service"
-
+	"user-api/internal/websocket"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
+	"user-api/internal/redis"
+
 )
 
 type UserHandler struct {
-	svc      *service.UserService
-	validate *validator.Validate
+    svc        *service.UserService
+    profileSvc *service.ProfileService  // add this
+    validate   *validator.Validate
+	wsHub		*websocket.Hub
 }
 
-func NewUserHandler(svc *service.UserService) *UserHandler {
-	return &UserHandler{svc: svc, validate: validator.New()}
+func NewUserHandler(svc *service.UserService, profileSvc *service.ProfileService , hub *websocket.Hub) *UserHandler {
+    return &UserHandler{
+        svc:        svc,
+        profileSvc: profileSvc,
+        validate:   validator.New(),
+		wsHub: hub,
+    }
 }
 
 // GET /users/me — requires auth middleware
@@ -63,15 +72,16 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
 	}
 	if err := h.validate.Struct(req); err != nil {
-		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
+		return err
 	}
 
 	user, err := h.svc.UpdateUser(c.Context(), id, req)
 	if err != nil {
-		return handleServiceError(c, err)
+		return err
 	}
 
 	logger.Log.Info("user updated", zap.Int32("id", id))
+	h.wsHub.Broadcast("user_updated", id)
 	return c.JSON(user)
 }
 
@@ -79,15 +89,16 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 func (h *UserHandler) DeleteUser(c *fiber.Ctx) error {
 	id, err := parseID(c)
 	if err != nil {
-		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid id")
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
 	}
 
 	if err := h.svc.DeleteUser(c.Context(), id); err != nil {
 		logger.Log.Error("delete user failed", zap.Error(err))
-		return models.RespondError(c, fiber.StatusInternalServerError, models.CodeServerError, "invalid body")
+		return err
 	}
 
 	logger.Log.Info("user deleted", zap.Int32("id", id))
+	h.wsHub.Broadcast("user_deleted", id)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -102,7 +113,7 @@ func (h *UserHandler) PasswordUpdate(c *fiber.Ctx) error {
 		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
 	}
 	if err := h.validate.Struct(req); err != nil {
-		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
+		return err
 	}
 
 	user, err := h.svc.UpdatePassword(c.Context(), authUser.ID, req)
@@ -122,9 +133,57 @@ func (h *UserHandler) ListUsers(c *fiber.Ctx) error {
 	users, err := h.svc.ListUsers(c.Context(), limit, offset)
 	if err != nil {
 		logger.Log.Error("list users failed", zap.Error(err))
-		return models.RespondError(c, fiber.StatusInternalServerError, models.CodeServerError, "loading users failed")
+		return err
 	}
 	return c.JSON(users)
+}
+
+func (h *UserHandler) UpdateProfile (c *fiber.Ctx) error{
+	var req models.UpdateProfileRequest
+
+	if err:=c.BodyParser(&req); err!=nil{
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid body")
+	}
+
+	if err:= h.validate.Struct(req);err!=nil{
+		return err
+	}
+	id,err:=parseID(c);
+	if err!=nil{
+		return models.RespondError(c, fiber.StatusBadRequest, models.CodeBadRequest, "invalid id")
+	}
+
+
+	user,err:=h.profileSvc.UpdateProfile(c.Context(),id,req)
+	if err!=nil{
+		
+		return handleServiceError(c, err)
+	}
+
+	h.wsHub.Broadcast("user_profile_updated", id)
+	return c.JSON(user)
+
+	
+
+	}
+
+
+func HealthCheck(db *sql.DB, rdb *redis.Client) fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        if err := db.PingContext(c.Context()); err != nil {
+            return c.Status(503).JSON(fiber.Map{
+                "status": "degraded",
+                "postgres": "down",
+            })
+        }
+        if err := rdb.Ping(c.Context()); err != nil {
+            return c.Status(503).JSON(fiber.Map{
+                "status": "degraded",
+                "redis": "down",
+            })
+        }
+        return c.JSON(fiber.Map{"status": "ok"})
+    }
 }
 
 func parseID(c *fiber.Ctx) (int32, error) {
@@ -146,8 +205,8 @@ func queryInt(c *fiber.Ctx, key string, fallback int32) int32 {
 
 func handleServiceError(c *fiber.Ctx, err error) error {
 	if errors.Is(err, service.ErrUserNotFound) {
-		return models.RespondError(c, fiber.StatusBadRequest, models.CodeNotFound, "user not found ")
+		return err
 	}
 	logger.Log.Error("service error", zap.Error(err))
-	return models.RespondError(c, fiber.StatusBadRequest, models.CodeServerError, "internal server error")
+	return err
 }

@@ -5,8 +5,22 @@
 package sqlc
 
 import (
+	"database/sql"
 	"time"
 )
+
+type Address struct {
+	ID         int32          `json:"id"`
+	UserID     int32          `json:"user_id"`
+	Line1      string         `json:"line1"`
+	Line2      sql.NullString `json:"line2"`
+	City       string         `json:"city"`
+	State      string         `json:"state"`
+	PostalCode string         `json:"postal_code"`
+	Country    string         `json:"country"`
+	CreatedAt  sql.NullTime   `json:"created_at"`
+	UpdatedAt  sql.NullTime   `json:"updated_at"`
+}
 
 type User struct {
 	ID           int32     `json:"id"`

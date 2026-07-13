@@ -26,23 +26,29 @@ func NewAuthService(repo *repository.AuthRepository, cfg config.Config) *AuthSer
 	return &AuthService{repo: repo, cfg: cfg}
 }
 
-func (s *AuthService) Signup(ctx context.Context, req models.SignupRequest) error {
+func (s *AuthService) Signup(ctx context.Context, req models.SignupRequest) (models.UserResponse,error) {
 	_, err := s.repo.GetByEmail(ctx, req.Email)
 	if err == nil {
-		return ErrEmailTaken
+		return models.UserResponse{},err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return models.UserResponse{},ErrEmailTaken
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return models.UserResponse{},err
 	}
 
 	dob, _ := time.Parse("2006-01-02", req.DOB)
-	_, err = s.repo.CreateUser(ctx, req.Name, req.Email, string(hash), "user", dob)
-	return err
+	u, err := s.repo.CreateUser(ctx, req.Name, req.Email, string(hash), "user", dob); 
+	if err!=nil{
+		return models.UserResponse{},err
+	}
+	return models.UserResponse{ID:    u.ID,
+        Name:  u.Name,
+        Email: u.Email, 
+        DOB:   u.Dob.Format(dateLayout),},err
 }
 
 func (s *AuthService) Login(ctx context.Context, req models.LoginRequest) (string, error) {

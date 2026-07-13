@@ -15,6 +15,10 @@ type Config struct {
 	ServerPort string
 	JWTSecret  string
     JWTExpHours int
+	RedisURL          string
+    RateLimitRequests int    
+    RateLimitWindow   int    
+    WSAllowedOrigins  string
 }
 
 // Load reads config from environment variables, with sensible defaults.
@@ -28,6 +32,11 @@ func Load() Config {
 		ServerPort: getEnv("SERVER_PORT", "3000"),
 		JWTSecret:   getEnv("JWT_SECRET", "changeme-secret"),
         JWTExpHours: 24,
+		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379"),
+        RateLimitRequests: 10,  
+        RateLimitWindow:   60,  
+        WSAllowedOrigins:  getEnv("WS_ALLOWED_ORIGINS", "*"),
+		
 	}
 }
 

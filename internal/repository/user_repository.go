@@ -43,3 +43,20 @@ func (r *UserRepository) UpdatePass(ctx context.Context,PasswordHash string, id 
 	return  r.q.UpdatePassword(ctx,sqlc.UpdatePasswordParams{PasswordHash: PasswordHash,ID: id})
 	
 }
+
+func (r *UserRepository) UpdateTx(
+    ctx context.Context,
+    tx *sql.Tx,
+    id int32,
+    name string,
+    dob time.Time,
+) (sqlc.UpdateUserRow, error) {
+
+    q := sqlc.New(tx)
+
+    return q.UpdateUser(ctx, sqlc.UpdateUserParams{
+        ID:   id,
+        Name: name,
+        Dob:  dob,
+    })
+}

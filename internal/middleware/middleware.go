@@ -3,12 +3,18 @@ package middleware
 import (
 	"time"
 	"strings"
+	"fmt"
+	"context"
 	"github.com/golang-jwt/jwt/v5"
 	"user-api/internal/logger"
 	"user-api/internal/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"user-api/internal/redis"
+	"runtime/debug"
+
+   
 )
 
 
@@ -75,3 +81,53 @@ func RequireRole(role string) fiber.Handler {
         return c.Next()
     }
 }
+
+
+
+
+
+func RateLimit(rdb *redis.Client, maxRequests int, window time.Duration) fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        ip := c.IP()
+        key := fmt.Sprintf("rate:%s:%s", c.Path(), ip)
+
+        count, err := rdb.Increment(context.Background(), key, window)
+        if err != nil {
+            logger.Log.Error("redis rate limit failed", zap.Error(err))
+            return c.Next()
+        }
+
+        if count > int64(maxRequests) {
+            c.Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
+            return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+                "error":       "too many requests",
+                "retry_after": int(window.Seconds()),
+            })
+        }
+
+        c.Set("X-RateLimit-Limit", fmt.Sprintf("%d", maxRequests))
+        c.Set("X-RateLimit-Remaining", fmt.Sprintf("%d", maxRequests-int(count)))
+
+        return c.Next()
+    }
+}
+
+func Recovery() fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        defer func() {
+            if r := recover(); r != nil {
+                logger.Log.Error("panic recovered",
+                    zap.Any("error", r),
+                    zap.String("stack", string(debug.Stack())),
+                    zap.String("path", c.Path()),
+                )
+                c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                    "error":     "internal server error",
+                    "requestId": c.Locals("requestID"),
+                })
+            }
+        }()
+        return c.Next()
+    }
+}
+

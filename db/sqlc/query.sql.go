@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -60,6 +61,38 @@ DELETE FROM users WHERE id = $1
 func (q *Queries) DeleteUser(ctx context.Context, id int32) error {
 	_, err := q.db.ExecContext(ctx, deleteUser, id)
 	return err
+}
+
+const getAddressByUserID = `-- name: GetAddressByUserID :one
+SELECT id, user_id, line1, line2, city, state, postal_code, country
+FROM addresses WHERE user_id = $1
+`
+
+type GetAddressByUserIDRow struct {
+	ID         int32          `json:"id"`
+	UserID     int32          `json:"user_id"`
+	Line1      string         `json:"line1"`
+	Line2      sql.NullString `json:"line2"`
+	City       string         `json:"city"`
+	State      string         `json:"state"`
+	PostalCode string         `json:"postal_code"`
+	Country    string         `json:"country"`
+}
+
+func (q *Queries) GetAddressByUserID(ctx context.Context, userID int32) (GetAddressByUserIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getAddressByUserID, userID)
+	var i GetAddressByUserIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Line1,
+		&i.Line2,
+		&i.City,
+		&i.State,
+		&i.PostalCode,
+		&i.Country,
+	)
+	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
@@ -217,6 +250,66 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 		&i.Name,
 		&i.Email,
 		&i.Dob,
+	)
+	return i, err
+}
+
+const upsertAddress = `-- name: UpsertAddress :one
+INSERT INTO addresses (user_id, line1, line2, city, state, postal_code, country)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id)
+DO UPDATE SET
+    line1       = EXCLUDED.line1,
+    line2       = EXCLUDED.line2,
+    city        = EXCLUDED.city,
+    state       = EXCLUDED.state,
+    postal_code = EXCLUDED.postal_code,
+    country     = EXCLUDED.country,
+    updated_at  = NOW()
+RETURNING id, user_id, line1, line2, city, state, postal_code, country
+`
+
+type UpsertAddressParams struct {
+	UserID     int32          `json:"user_id"`
+	Line1      string         `json:"line1"`
+	Line2      sql.NullString `json:"line2"`
+	City       string         `json:"city"`
+	State      string         `json:"state"`
+	PostalCode string         `json:"postal_code"`
+	Country    string         `json:"country"`
+}
+
+type UpsertAddressRow struct {
+	ID         int32          `json:"id"`
+	UserID     int32          `json:"user_id"`
+	Line1      string         `json:"line1"`
+	Line2      sql.NullString `json:"line2"`
+	City       string         `json:"city"`
+	State      string         `json:"state"`
+	PostalCode string         `json:"postal_code"`
+	Country    string         `json:"country"`
+}
+
+func (q *Queries) UpsertAddress(ctx context.Context, arg UpsertAddressParams) (UpsertAddressRow, error) {
+	row := q.db.QueryRowContext(ctx, upsertAddress,
+		arg.UserID,
+		arg.Line1,
+		arg.Line2,
+		arg.City,
+		arg.State,
+		arg.PostalCode,
+		arg.Country,
+	)
+	var i UpsertAddressRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Line1,
+		&i.Line2,
+		&i.City,
+		&i.State,
+		&i.PostalCode,
+		&i.Country,
 	)
 	return i, err
 }
