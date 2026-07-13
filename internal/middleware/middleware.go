@@ -30,14 +30,25 @@ func RequestID() fiber.Handler {
 func RequestLogger() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
-		err := c.Next() 
+		err := c.Next()
+		userID := "anonymous"
+
+		if u := c.Locals("user"); u != nil {
+			if authUser, ok := u.(models.AuthUser); ok {
+				userID = fmt.Sprintf("%d", authUser.ID)
+			}
+		}
+
 		logger.Log.Info("request",
 			zap.String("method", c.Method()),
 			zap.String("path", c.Path()),
 			zap.Int("status", c.Response().StatusCode()),
-			zap.Duration("duration", time.Since(start)),
+			zap.Duration("latency", time.Since(start)),
 			zap.Any("requestID", c.Locals("requestID")),
+			zap.String("userID", userID),
+			zap.String("ip", c.IP()),
 		)
+
 		return err
 	}
 }
