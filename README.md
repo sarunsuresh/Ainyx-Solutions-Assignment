@@ -1,116 +1,536 @@
 # User API
 
-A simple REST API built with Go and Fiber to manage users. Each user has a name and a date of birth, and the API calculates their age automatically when you fetch them.
+A production-style REST API built with **Go**, **Fiber**, and **PostgreSQL** demonstrating layered architecture, authentication, WebSockets, Redis, gRPC microservices, background workers, circuit breakers, and resilient email delivery.
 
-## Tech Stack
+---
 
-- **Go** with **Fiber** (web framework)
-- **PostgreSQL** (database)
-- **SQLC** (generates type-safe Go code from SQL)
-- **Zap** (logging)
-- **validator** (input validation)
+# Features
 
-## Project Structure
+- User CRUD
+- JWT Authentication
+- Role-based Authorization (User/Admin)
+- Account Activation via Email
+- gRPC Email Microservice
+- WebSocket Notifications
+- Redis-backed Rate Limiting
+- Circuit Breaker
+- Retry Queue with Exponential Backoff
+- Queue Worker
+- Global Error Handler
+- Panic Recovery Middleware
+- Structured Zap Logging
+- Request ID Tracking
+- Health Checks
+- SQLC
+- PostgreSQL
+
+---
+
+# Tech Stack
+
+- **Go**
+- **Fiber**
+- **PostgreSQL**
+- **Redis**
+- **SQLC**
+- **Zap**
+- **JWT**
+- **gRPC**
+- **Protocol Buffers**
+- **Docker**
+- **Validator**
+
+---
+
+# Architecture
 
 ```
-cmd/server/main.go     # starts the app
-config/                # reads settings from environment
-db/migrations/         # database table setup
-db/sqlc/               # SQL queries + generated code
+                        HTTP Client
+                             │
+                             ▼
+                        Fiber Router
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+           Global Middleware      WebSocket Endpoint
+                 │                       │
+                 ▼                       ▼
+             Handlers              Hub Broadcast
+                 │
+                 ▼
+             Services
+                 │
+      ┌──────────┴──────────┐
+      │                     │
+Repositories          Activation Service
+      │                     │
+      │                     ▼
+      │             Email gRPC Client
+      │                     │
+      │              Circuit Breaker
+      │                     │
+      │              gRPC Email Service
+      │
+      ▼
+ PostgreSQL
+
+Background Components
+
+Queue
+ ↓
+Worker
+ ↓
+Retry with Exponential Backoff
+```
+
+---
+
+# Project Structure
+
+```
+cmd/
+│
+├── server/
+│     main.go
+│
+└── emailservice/
+      main.go
+
+config/
+
+db/
+├── migrations/
+└── sqlc/
+
 internal/
-  handler/             # handles HTTP requests/responses
-  service/             # business logic (age calculation)
-  repository/          # database access
-  routes/              # connects URLs to handlers
-  middleware/          # request ID + request logging
-  models/              # request/response shapes
-  logger/              # logger setup
+
+├── activation/
+│      account activation logic
+│
+├── clients/
+│      gRPC client
+│      circuit breaker
+│
+├── email/
+│      gRPC email server
+│
+├── handler/
+│
+├── logger/
+│
+├── middleware/
+│
+├── models/
+│
+├── queue/
+│      retry queue
+│      worker
+│
+├── redis/
+│
+├── repository/
+│
+├── routes/
+│
+├── service/
+│
+└── websocket/
 ```
 
-Request flow: **routes → handler → service → repository → database**
+---
 
-## Getting Started
+# Request Flow
 
-### Option 1: Run everything with Docker
+```
+HTTP Request
 
-```bash
-docker-compose up --build
+↓
+
+Routes
+
+↓
+
+Middleware
+
+↓
+
+Handler
+
+↓
+
+Service
+
+↓
+
+Repository
+
+↓
+
+PostgreSQL
 ```
 
-The database and app both start, and the table is created automatically.
+Email activation flow
 
-### Option 2: Run the database in Docker, app in your terminal
+```
+Signup
 
-Start just the database:
-```bash
-docker-compose up db
+↓
+
+Activation Service
+
+↓
+
+Email Client
+
+↓
+
+Circuit Breaker
+
+↓
+
+gRPC Email Service
 ```
 
-In a second terminal, run the app (pointing it at the Docker database on port 5433):
-```bash
-# Windows PowerShell
-$env:DB_HOST="localhost"
-$env:DB_PORT="5433"
+Retry flow
+
+```
+Email Failure
+
+↓
+
+Queue
+
+↓
+
+Worker
+
+↓
+
+Retry
+
+↓
+
+Email Service
+```
+
+---
+
+# Authentication
+
+JWT-based authentication.
+
+Protected endpoints require
+
+```
+Authorization: Bearer <token>
+```
+
+Supports
+
+- User
+- Admin
+
+Role-based authorization middleware protects admin endpoints.
+
+---
+
+# API Endpoints
+
+## Authentication
+
+| Method | Endpoint |
+|---------|----------|
+| POST | /auth/signup |
+| POST | /auth/login |
+| POST | /auth/activate |
+| POST | /auth/resend |
+
+---
+
+## Users
+
+| Method | Endpoint |
+|---------|----------|
+| GET | /users |
+| GET | /users/me |
+| GET | /users/:id |
+| PUT | /users/:id |
+| PUT | /users/:id/profile |
+| PATCH | /users/me/passwordupdate |
+
+---
+
+## Admin
+
+| Method | Endpoint |
+|---------|----------|
+| GET | /admin/users |
+| DELETE | /admin/users/:id |
+
+---
+
+## Health
+
+| Method | Endpoint |
+|---------|----------|
+| GET | /healthz |
+
+---
+
+## WebSocket
+
+```
+ws://localhost:3000/ws
+```
+
+Broadcasts
+
+- user_created
+- user_updated
+- user_deleted
+- user_profile_updated
+
+---
+
+# Email Service
+
+Runs as a separate process.
+
+```
+cmd/emailservice
+```
+
+Responsibilities
+
+- Receive gRPC requests
+- Simulate email sending
+- Artificial failures
+- Health checks
+- Structured logging
+
+---
+
+# Circuit Breaker
+
+Protects the User API from repeatedly calling an unhealthy Email Service.
+
+States
+
+```
+Closed
+
+↓
+
+Open
+
+↓
+
+Half Open
+
+↓
+
+Closed
+```
+
+Features
+
+- Configurable failure threshold
+- Fast-fail when open
+- Automatic recovery testing
+- Timeout-based reset
+
+---
+
+# Retry Queue
+
+Failed emails are queued for retry.
+
+Features
+
+- Thread-safe queue
+- Background worker
+- Exponential backoff
+- Automatic retries
+
+Backoff
+
+```
+1 min
+
+↓
+
+2 min
+
+↓
+
+4 min
+
+↓
+
+8 min
+
+↓
+
+16 min
+
+↓
+
+30 min (cap)
+```
+
+---
+
+# Logging
+
+Zap structured logging records
+
+- Request ID
+- User ID
+- Method
+- Path
+- Status
+- Latency
+- Client IP
+- Redis failures
+- WebSocket events
+- Queue activity
+- Circuit breaker state changes
+- Transaction logs
+- Panic stack traces
+
+---
+
+# Middleware
+
+Implemented middleware
+
+- Request ID
+- Request Logger
+- Recovery
+- Global Error Handler
+- JWT Authentication
+- Role Authorization
+- Redis Rate Limiter
+
+---
+
+# Error Handling
+
+Global error handler converts application errors into consistent JSON responses.
+
+Example
+
+```json
+{
+    "error":"resource not found",
+    "requestId":"..."
+}
+```
+
+Handles
+
+- Validation errors
+- SQL errors
+- Authentication errors
+- Authorization errors
+- Rate limits
+- Panics
+- Missing routes
+
+---
+
+# Health Checks
+
+```
+GET /healthz
+```
+
+Checks
+
+- PostgreSQL
+- Redis
+
+Example
+
+```json
+{
+    "status":"ok"
+}
+```
+
+or
+
+```json
+{
+    "status":"degraded",
+    "redis":"down"
+}
+```
+
+---
+
+# Running
+
+## Start everything
+
+```
+docker compose up --build
+```
+
+---
+
+## Start only PostgreSQL + Redis
+
+```
+docker compose up db redis
+```
+
+Run User API
+
+```
 go run ./cmd/server
 ```
 
-The server runs at `http://localhost:3000`.
+Run Email Service
 
-## API Endpoints
-
-| Method | Endpoint      | Description              |
-|--------|---------------|--------------------------|
-| POST   | `/users`      | Create a user            |
-| GET    | `/users`      | List all users           |
-| GET    | `/users/:id`  | Get one user (with age)  |
-| PUT    | `/users/:id`  | Update a user            |
-| DELETE | `/users/:id`  | Delete a user            |
-
-The list endpoint supports pagination: `/users?limit=10&offset=0`
-
-### Example: Create a user
-
-POST `/users`
-```json
-{
-  "name": "Alice",
-  "dob": "1990-05-10"
-}
+```
+go run ./cmd/emailservice
 ```
 
-Response:
-```json
-{
-  "id": 1,
-  "name": "Alice",
-  "dob": "1990-05-10"
-}
+---
+
+# Running Tests
+
 ```
-
-### Example: Get a user
-
-GET `/users/1`
-```json
-{
-  "id": 1,
-  "name": "Alice",
-  "dob": "1990-05-10",
-  "age": 36
-}
-```
-
-> Note: `dob` must be in `YYYY-MM-DD` format. Age is calculated automatically.
-
-## Running Tests
-
-```bash
 go test ./...
 ```
 
-The age calculation has unit tests in `internal/service/user_service_test.go`.
+Includes
 
-## Notes
+- Service unit tests
+- Circuit breaker tests
+- Queue tests
 
-- Age is calculated on every request instead of being stored, so it's always accurate.
-- Every response includes an `X-Request-ID` header for tracking.
-- Each request is logged with its method, path, status, and duration.
+---
+
+# Technologies Demonstrated
+
+- Layered Architecture
+- Repository Pattern
+- Dependency Injection
+- JWT Authentication
+- Role-Based Access Control
+- SQLC
+- PostgreSQL
+- Redis
+- WebSockets
+- gRPC
+- Protocol Buffers
+- Circuit Breaker Pattern
+- Retry Queue
+- Background Workers
+- Exponential Backoff
+- Structured Logging
+- Graceful Shutdown
+- Docker
+- Health Checks
