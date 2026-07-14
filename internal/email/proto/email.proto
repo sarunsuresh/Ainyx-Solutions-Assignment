@@ -1,0 +1,31 @@
+syntax ="proto3";
+
+package email;
+
+option go_package = "user-api/internal/email/proto;proto";
+
+service EmailService{
+    rpc SendActivationEmail (SendActivationEmailRequest)
+        returns (SendActivationEmailResponse);
+
+    rpc CheckHealth(HealthRequest)
+        returns (HealthResponse);
+}
+
+message SendActivationEmailRequest{
+    int32 user_id =1;
+    string email =2;
+    string activation_code =3;
+}
+
+message SendActivationEmailResponse{
+    bool success =1;
+    string messsage =2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool   ready   = 1;
+  string message = 2;
+}

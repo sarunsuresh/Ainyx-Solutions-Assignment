@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+const activateUser = `-- name: ActivateUser :exec
+UPDATE users
+SET is_active          = true,
+    activation_token   = NULL,
+    activation_expires = NULL
+WHERE id = $1
+`
+
+func (q *Queries) ActivateUser(ctx context.Context, id int32) error {
+	_, err := q.db.ExecContext(ctx, activateUser, id)
+	return err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (name, email, password_hash, role, dob)
 VALUES ($1, $2, $3, $4, $5)
@@ -95,8 +108,60 @@ func (q *Queries) GetAddressByUserID(ctx context.Context, userID int32) (GetAddr
 	return i, err
 }
 
+const getUserActivationMeta = `-- name: GetUserActivationMeta :one
+SELECT id, email, is_active, email_send_count, last_email_sent_at
+FROM users WHERE email = $1
+`
+
+type GetUserActivationMetaRow struct {
+	ID              int32        `json:"id"`
+	Email           string       `json:"email"`
+	IsActive        bool         `json:"is_active"`
+	EmailSendCount  int32        `json:"email_send_count"`
+	LastEmailSentAt sql.NullTime `json:"last_email_sent_at"`
+}
+
+func (q *Queries) GetUserActivationMeta(ctx context.Context, email string) (GetUserActivationMetaRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserActivationMeta, email)
+	var i GetUserActivationMetaRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.IsActive,
+		&i.EmailSendCount,
+		&i.LastEmailSentAt,
+	)
+	return i, err
+}
+
+const getUserByActivationToken = `-- name: GetUserByActivationToken :one
+SELECT id, email, is_active, activation_token, activation_expires
+FROM users WHERE activation_token = $1
+`
+
+type GetUserByActivationTokenRow struct {
+	ID                int32          `json:"id"`
+	Email             string         `json:"email"`
+	IsActive          bool           `json:"is_active"`
+	ActivationToken   sql.NullString `json:"activation_token"`
+	ActivationExpires sql.NullTime   `json:"activation_expires"`
+}
+
+func (q *Queries) GetUserByActivationToken(ctx context.Context, activationToken sql.NullString) (GetUserByActivationTokenRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByActivationToken, activationToken)
+	var i GetUserByActivationTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.IsActive,
+		&i.ActivationToken,
+		&i.ActivationExpires,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, password_hash, role, dob
+SELECT id, name, email, password_hash, role, dob,is_active
 FROM users WHERE email = $1
 `
 
@@ -107,6 +172,7 @@ type GetUserByEmailRow struct {
 	PasswordHash string    `json:"password_hash"`
 	Role         string    `json:"role"`
 	Dob          time.Time `json:"dob"`
+	IsActive     bool      `json:"is_active"`
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -119,21 +185,23 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.PasswordHash,
 		&i.Role,
 		&i.Dob,
+		&i.IsActive,
 	)
 	return i, err
 }
 
 const getUserById = `-- name: GetUserById :one
-SELECT id, name, email, role, dob
+SELECT id, name, email, role, dob,is_active
 FROM users WHERE id = $1
 `
 
 type GetUserByIdRow struct {
-	ID    int32     `json:"id"`
-	Name  string    `json:"name"`
-	Email string    `json:"email"`
-	Role  string    `json:"role"`
-	Dob   time.Time `json:"dob"`
+	ID       int32     `json:"id"`
+	Name     string    `json:"name"`
+	Email    string    `json:"email"`
+	Role     string    `json:"role"`
+	Dob      time.Time `json:"dob"`
+	IsActive bool      `json:"is_active"`
 }
 
 func (q *Queries) GetUserById(ctx context.Context, id int32) (GetUserByIdRow, error) {
@@ -145,6 +213,7 @@ func (q *Queries) GetUserById(ctx context.Context, id int32) (GetUserByIdRow, er
 		&i.Email,
 		&i.Role,
 		&i.Dob,
+		&i.IsActive,
 	)
 	return i, err
 }
@@ -185,6 +254,27 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 		return nil, err
 	}
 	return items, nil
+}
+
+const setActivationToken = `-- name: SetActivationToken :exec
+UPDATE users
+SET activation_token        = $1,
+    activation_expires      = $2,
+    activation_requested_at = NOW(),
+    last_email_sent_at          = NOW(),
+    email_send_count            = resend_count + 1
+WHERE id = $3
+`
+
+type SetActivationTokenParams struct {
+	ActivationToken   sql.NullString `json:"activation_token"`
+	ActivationExpires sql.NullTime   `json:"activation_expires"`
+	ID                int32          `json:"id"`
+}
+
+func (q *Queries) SetActivationToken(ctx context.Context, arg SetActivationTokenParams) error {
+	_, err := q.db.ExecContext(ctx, setActivationToken, arg.ActivationToken, arg.ActivationExpires, arg.ID)
+	return err
 }
 
 const updatePassword = `-- name: UpdatePassword :one

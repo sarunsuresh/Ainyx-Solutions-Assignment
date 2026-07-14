@@ -3,16 +3,19 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
-	"fmt"
 	"os/signal"
 	"syscall"
 	"time"
 	"user-api/config"
+	"user-api/internal/activation"
+	"user-api/internal/clients"
 	"user-api/internal/handler"
 	"user-api/internal/logger"
 	"user-api/internal/middleware"
+	"user-api/internal/queue"
 	"user-api/internal/redis"
 	"user-api/internal/repository"
 	"user-api/internal/routes"
@@ -42,6 +45,22 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("ping db: %v", err)
 	}
+	cb := clients.NewCircuitBreaker(cfg.CBMaxFailures, cfg.CBResetTimeout)
+
+	emailClient, err := clients.NewEmailClient(cfg.EmailServiceAddr, cb)
+	emailQueue := queue.NewQueue()
+	worker     := queue.NewWorker(emailQueue, emailClient)
+	authRepo := repository.NewAuthRepository(db)
+
+	activationSvc := activation.NewActivationService(authRepo, emailClient, emailQueue)
+
+	if err != nil {
+		log.Fatalf("failed to connect to email service: %v", err)
+	}
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	worker.Start(workerCtx)
+
 	hub := websocket.NewHub()
 	fmt.Printf("main hub: %p\n", hub)
 	repo := repository.NewUserRepository(db)
@@ -49,8 +68,8 @@ func main() {
 	svc := service.NewUserService(repo)
 	psvc := service.NewProfileService(db, repo, addrepo)
 	h := handler.NewUserHandler(svc, psvc, hub)
-	authRepo := repository.NewAuthRepository(db)
-	authSvc := service.NewAuthService(authRepo, cfg)
+
+	authSvc := service.NewAuthService(authRepo, cfg, activationSvc)
 
 	ah := handler.NewAuthHandler(authSvc, hub)
 	rdb, _ := redis.New(cfg.RedisURL)
@@ -83,7 +102,7 @@ func main() {
 	if err := app.ShutdownWithContext(ctx); err != nil {
 		logger.Log.Error("shutdown error", zap.Error(err))
 	}
-
+	workerCancel() 
 	rdb.Close()
 	db.Close()
 	logger.Log.Info("shutdown complete")

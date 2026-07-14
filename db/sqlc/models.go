@@ -23,12 +23,17 @@ type Address struct {
 }
 
 type User struct {
-	ID           int32     `json:"id"`
-	Name         string    `json:"name"`
-	Dob          time.Time `json:"dob"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"password_hash"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                int32          `json:"id"`
+	Name              string         `json:"name"`
+	Dob               time.Time      `json:"dob"`
+	Email             string         `json:"email"`
+	PasswordHash      string         `json:"password_hash"`
+	Role              string         `json:"role"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	IsActive          bool           `json:"is_active"`
+	ActivationToken   sql.NullString `json:"activation_token"`
+	ActivationExpires sql.NullTime   `json:"activation_expires"`
+	LastEmailSentAt   sql.NullTime   `json:"last_email_sent_at"`
+	EmailSendCount    int32          `json:"email_send_count"`
 }
